@@ -737,7 +737,22 @@ export default function Decoder() {
                     max={10000}
                     step={100}
                     value={streamInterval}
-                    onChange={(e) => setStreamInterval(parseInt(e.target.value) || 1000)}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value);
+                      if (isNaN(value)) {
+                        setStreamInterval(1000);
+                      } else {
+                        // Clamp value between 100 and 10000
+                        setStreamInterval(Math.min(Math.max(value, 100), 10000));
+                      }
+                    }}
+                    onBlur={(e) => {
+                      // Re-clamp on blur to ensure valid value
+                      const value = parseInt(e.target.value);
+                      if (isNaN(value) || value < 100 || value > 10000) {
+                        setStreamInterval(Math.min(Math.max(value || 1000, 100), 10000));
+                      }
+                    }}
                     data-testid="input-stream-interval"
                   />
                 </div>
