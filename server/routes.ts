@@ -8,6 +8,101 @@ import protobuf from "protobufjs";
 const upload = multer({ storage: multer.memoryStorage() });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Helper function to recursively collect all message types
+  function collectMessageTypes(obj: protobuf.ReflectionObject, prefix = ""): { type: protobuf.Type; fullName: string }[] {
+    const types: { type: protobuf.Type; fullName: string }[] = [];
+    
+    if (obj instanceof protobuf.Type) {
+      const fullName = prefix ? `${prefix}.${obj.name}` : obj.name;
+      types.push({ 
+        type: obj, 
+        fullName 
+      });
+      
+      // Types can also have nested types (messages within messages)
+      if (obj.nestedArray && obj.nestedArray.length > 0) {
+        for (const nested of obj.nestedArray) {
+          types.push(...collectMessageTypes(nested, fullName));
+        }
+      }
+    } else if (obj instanceof protobuf.Namespace) {
+      const nestedPrefix = prefix ? `${prefix}.${obj.name}` : obj.name;
+      for (const nested of obj.nestedArray) {
+        types.push(...collectMessageTypes(nested, nestedPrefix));
+      }
+    }
+    
+    return types;
+  }
+
+  // Get available message types from protobuf bindings
+  app.post("/api/message-types", upload.single("bindingsFile"), async (req, res) => {
+    try {
+      const { bindingsSource, bindingsUrl } = req.body;
+
+      let protoContent: string;
+
+      if (bindingsSource === "file") {
+        if (!req.file) {
+          return res.status(400).json({
+            success: false,
+            error: "Bindings file is required",
+          });
+        }
+        protoContent = req.file.buffer.toString("utf-8");
+      } else if (bindingsSource === "url") {
+        if (!bindingsUrl) {
+          return res.status(400).json({
+            success: false,
+            error: "Bindings URL is required",
+          });
+        }
+        
+        try {
+          const bindingsResponse = await axios.get(bindingsUrl, {
+            responseType: "text",
+            timeout: 10000,
+          });
+          protoContent = bindingsResponse.data;
+        } catch (error: any) {
+          return res.status(400).json({
+            success: false,
+            error: `Failed to fetch bindings: ${error.message}`,
+          });
+        }
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid bindings source",
+        });
+      }
+
+      // Parse the protobuf schema
+      let root: protobuf.Root;
+      try {
+        root = protobuf.parse(protoContent).root;
+      } catch (error: any) {
+        return res.status(400).json({
+          success: false,
+          error: `Failed to parse protobuf schema: ${error.message}`,
+        });
+      }
+
+      const messageTypes = collectMessageTypes(root);
+
+      res.json({
+        success: true,
+        messageTypes: messageTypes.map(mt => mt.fullName),
+      });
+    } catch (error: any) {
+      console.error("Message types error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Internal server error",
+      });
+    }
+  });
+
   // Protobuf decode endpoint
   app.post("/api/decode", upload.single("bindingsFile"), async (req, res) => {
     try {
@@ -86,10 +181,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Try to decode with all available message types
-      const messageTypes = root.nestedArray.filter(
-        (nested) => nested instanceof protobuf.Type
-      ) as protobuf.Type[];
+      const messageTypes = collectMessageTypes(root);
 
       if (messageTypes.length === 0) {
         return res.status(400).json({
@@ -98,36 +190,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Try decoding with each message type until one succeeds
+      const { messageType: requestedMessageType } = req.body;
+
       let decoded: any = null;
       let successfulType: string = "";
+      let messageTypeObj: protobuf.Type | null = null;
 
-      for (const messageType of messageTypes) {
-        try {
-          decoded = messageType.decode(feedData);
-          successfulType = messageType.name;
-          break;
-        } catch (error) {
-          // Continue to next type
-          continue;
+      // If user specified a message type, try to use it
+      if (requestedMessageType) {
+        const found = messageTypes.find(
+          mt => mt.fullName === requestedMessageType || 
+                mt.type.name === requestedMessageType ||
+                mt.fullName.endsWith(`.${requestedMessageType}`)
+        );
+        
+        if (found) {
+          try {
+            decoded = found.type.decode(feedData);
+            successfulType = found.fullName;
+            messageTypeObj = found.type;
+          } catch (error: any) {
+            return res.status(400).json({
+              success: false,
+              error: `Failed to decode with message type '${requestedMessageType}': ${error.message}`,
+            });
+          }
+        } else {
+          return res.status(400).json({
+            success: false,
+            error: `Message type '${requestedMessageType}' not found in schema`,
+          });
+        }
+      } else {
+        // Try decoding with each message type until one succeeds
+        for (const { type, fullName } of messageTypes) {
+          try {
+            decoded = type.decode(feedData);
+            successfulType = fullName;
+            messageTypeObj = type;
+            break;
+          } catch (error) {
+            continue;
+          }
         }
       }
 
-      if (!decoded) {
+      if (!decoded || !messageTypeObj) {
         return res.status(400).json({
           success: false,
           error: "Failed to decode protobuf data with any available message type",
+          availableTypes: messageTypes.map(mt => mt.fullName),
         });
       }
 
       const decodeTime = Date.now() - startTime;
 
       // Convert to plain object for JSON serialization
-      const plainObject = messageTypes.find(t => t.name === successfulType)?.toObject(decoded, {
+      const plainObject = messageTypeObj.toObject(decoded, {
         longs: String,
         enums: String,
         bytes: String,
-      }) || decoded;
+      });
 
       res.json({
         success: true,

@@ -1,15 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
-import { Upload, Link as LinkIcon, Code, CheckCircle, XCircle, Loader2, Copy, FileText } from "lucide-react";
+import { Upload, Link as LinkIcon, Code, CheckCircle, XCircle, Loader2, Copy, FileText, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
 import type { DecodeResponse } from "@shared/schema";
 
 export default function Decoder() {
@@ -17,6 +17,8 @@ export default function Decoder() {
   const [bindingsFile, setBindingsFile] = useState<File | null>(null);
   const [bindingsUrl, setBindingsUrl] = useState("");
   const [feedUrl, setFeedUrl] = useState("");
+  const [messageType, setMessageType] = useState<string>("");
+  const [availableTypes, setAvailableTypes] = useState<string[]>([]);
   const [decodedOutput, setDecodedOutput] = useState("");
   const [decodeTime, setDecodeTime] = useState<number | null>(null);
   const { toast } = useToast();
@@ -24,8 +26,16 @@ export default function Decoder() {
   const onDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       setBindingsFile(acceptedFiles[0]);
+      setAvailableTypes([]);
+      setMessageType("");
     }
   };
+
+  // Clear message types when bindings source or URL changes
+  useEffect(() => {
+    setAvailableTypes([]);
+    setMessageType("");
+  }, [bindingsSource, bindingsUrl]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -36,11 +46,66 @@ export default function Decoder() {
     multiple: false,
   });
 
+  // Mutation to fetch available message types
+  const fetchTypesMutation = useMutation({
+    mutationFn: async () => {
+      const formData = new FormData();
+      formData.append("bindingsSource", bindingsSource);
+
+      if (bindingsSource === "file" && bindingsFile) {
+        formData.append("bindingsFile", bindingsFile);
+      } else if (bindingsSource === "url" && bindingsUrl) {
+        formData.append("bindingsUrl", bindingsUrl);
+      } else {
+        throw new Error("Please provide protobuf bindings");
+      }
+
+      const response = await fetch("/api/message-types", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to fetch message types");
+      }
+
+      const data = await response.json();
+      return data.messageTypes as string[];
+    },
+    onSuccess: (types) => {
+      setAvailableTypes(types);
+      // Reset or set message type
+      if (types.length > 0) {
+        if (!messageType || !types.includes(messageType)) {
+          setMessageType(types[0]);
+        }
+      } else {
+        setMessageType("");
+      }
+      toast({
+        title: "Message Types Loaded",
+        description: `Found ${types.length} message type(s)`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const decodeMutation = useMutation({
     mutationFn: async () => {
       const formData = new FormData();
       formData.append("bindingsSource", bindingsSource);
       formData.append("feedUrl", feedUrl);
+
+      if (messageType) {
+        formData.append("messageType", messageType);
+      }
 
       if (bindingsSource === "file" && bindingsFile) {
         formData.append("bindingsFile", bindingsFile);
@@ -236,23 +301,65 @@ export default function Decoder() {
               <CardTitle className="text-lg">Protobuf Feed URL</CardTitle>
               <CardDescription className="text-xs">Enter the URL of the protobuf feed</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-2">
-              <Label htmlFor="feed-url" className="text-xs font-medium uppercase tracking-wide">
-                Feed URL
-              </Label>
-              <div className="relative">
-                <LinkIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="feed-url"
-                  type="url"
-                  placeholder="https://api.example.com/feed"
-                  value={feedUrl}
-                  onChange={(e) => setFeedUrl(e.target.value)}
-                  className="pl-9"
-                  data-testid="input-feed-url"
-                />
-                {isFeedUrlValid && (
-                  <CheckCircle className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-chart-2" />
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="feed-url" className="text-xs font-medium uppercase tracking-wide">
+                  Feed URL
+                </Label>
+                <div className="relative">
+                  <LinkIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="feed-url"
+                    type="url"
+                    placeholder="https://api.example.com/feed"
+                    value={feedUrl}
+                    onChange={(e) => setFeedUrl(e.target.value)}
+                    className="pl-9"
+                    data-testid="input-feed-url"
+                  />
+                  {isFeedUrlValid && (
+                    <CheckCircle className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-chart-2" />
+                  )}
+                </div>
+              </div>
+
+              {/* Message Type Selection */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="message-type" className="text-xs font-medium uppercase tracking-wide">
+                    Message Type {availableTypes.length > 0 && <span className="text-muted-foreground">({availableTypes.length} available)</span>}
+                  </Label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => fetchTypesMutation.mutate()}
+                    disabled={!isBindingsValid || fetchTypesMutation.isPending}
+                    data-testid="button-load-types"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${fetchTypesMutation.isPending ? 'animate-spin' : ''}`} />
+                  </Button>
+                </div>
+                {availableTypes.length > 0 ? (
+                  <Select value={messageType} onValueChange={setMessageType}>
+                    <SelectTrigger data-testid="select-message-type">
+                      <SelectValue placeholder="Select message type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableTypes.map((type) => (
+                        <SelectItem key={type} value={type} data-testid={`option-type-${type}`}>
+                          {type}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    id="message-type"
+                    placeholder="Optional: specify message type"
+                    value={messageType}
+                    onChange={(e) => setMessageType(e.target.value)}
+                    data-testid="input-message-type"
+                  />
                 )}
               </div>
             </CardContent>
