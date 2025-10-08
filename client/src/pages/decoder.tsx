@@ -33,7 +33,7 @@ interface DecodeHistoryItem {
 export default function Decoder() {
   const [bindingsSource, setBindingsSource] = useState<"file" | "url">("file");
   const [bindingsFile, setBindingsFile] = useState<File | null>(null);
-  const [bindingsUrl, setBindingsUrl] = useState("");
+  const [bindingsUrl, setBindingsUrl] = useState("https://gtfs.org/documentation/realtime/gtfs-realtime.proto");
   const [feedUrl, setFeedUrl] = useState("");
   const [messageType, setMessageType] = useState<string>("");
   const [availableTypes, setAvailableTypes] = useState<string[]>([]);
