@@ -330,12 +330,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     ws.on("message", async (message: string) => {
       try {
         const config = JSON.parse(message.toString());
-        const { bindingsContent, feedUrl, messageType, outputFormat = "json", interval = 1000 } = config;
+        const { bindingsSource, bindingsContent, bindingsUrl, feedUrl, messageType, outputFormat = "json", interval = 1000 } = config;
 
-        if (!bindingsContent || !feedUrl) {
+        if (!feedUrl) {
           ws.send(JSON.stringify({ 
             success: false, 
-            error: "Missing bindings or feed URL" 
+            error: "Missing feed URL" 
+          }));
+          return;
+        }
+
+        // Get bindings content
+        let protoContent: string;
+        
+        if (bindingsContent) {
+          // Direct bindings content provided (file upload)
+          protoContent = bindingsContent;
+        } else if (bindingsUrl) {
+          // Fetch bindings from URL
+          try {
+            const bindingsResponse = await axios.get(bindingsUrl, {
+              responseType: "text",
+              timeout: 10000,
+            });
+            protoContent = bindingsResponse.data;
+          } catch (error: any) {
+            ws.send(JSON.stringify({ 
+              success: false, 
+              error: `Failed to fetch bindings from URL: ${error.message}` 
+            }));
+            return;
+          }
+        } else {
+          ws.send(JSON.stringify({ 
+            success: false, 
+            error: "Missing bindings content or URL" 
           }));
           return;
         }
@@ -343,7 +372,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Parse protobuf schema
         let root: protobuf.Root;
         try {
-          root = protobuf.parse(bindingsContent).root;
+          root = protobuf.parse(protoContent).root;
         } catch (error: any) {
           ws.send(JSON.stringify({ 
             success: false, 
@@ -406,7 +435,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             let output: string;
             switch (outputFormat) {
               case "xml":
-                output = js2xml(JSON.stringify(plainObject), { compact: true, spaces: 2 });
+                output = js2xml({ protobuf: plainObject }, { compact: true, spaces: 2 });
                 break;
               case "text":
                 const formatAsText = (obj: any, indent = 0): string => {

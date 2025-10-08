@@ -143,40 +143,23 @@ export default function Decoder() {
       return;
     }
 
-    // Get bindings content first
-    let bindingsContent: string;
+    // Validate bindings
+    if (bindingsSource === "file" && !bindingsFile) {
+      toast({
+        title: "Error",
+        description: "Please upload a bindings file first",
+        variant: "destructive",
+      });
+      return;
+    }
     
-    if (bindingsSource === "file") {
-      if (!bindingsFile) {
-        toast({
-          title: "Error",
-          description: "Please upload a bindings file first",
-          variant: "destructive",
-        });
-        return;
-      }
-      bindingsContent = await bindingsFile.text();
-    } else {
-      if (!bindingsUrl.trim()) {
-        toast({
-          title: "Error",
-          description: "Please enter a bindings URL first",
-          variant: "destructive",
-        });
-        return;
-      }
-      
-      try {
-        const response = await fetch(bindingsUrl);
-        bindingsContent = await response.text();
-      } catch (error: any) {
-        toast({
-          title: "Error",
-          description: `Failed to fetch bindings: ${error.message}`,
-          variant: "destructive",
-        });
-        return;
-      }
+    if (bindingsSource === "url" && !bindingsUrl.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a bindings URL first",
+        variant: "destructive",
+      });
+      return;
     }
 
     // Establish WebSocket connection
@@ -186,16 +169,26 @@ export default function Decoder() {
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
-    ws.onopen = () => {
+    ws.onopen = async () => {
       setIsStreaming(true);
       
-      ws.send(JSON.stringify({
-        bindingsContent,
+      // Prepare message payload
+      const payload: any = {
+        bindingsSource,
         feedUrl,
         messageType: messageType || undefined,
         outputFormat,
         interval: streamInterval,
-      }));
+      };
+
+      // Add bindings content or URL
+      if (bindingsSource === "file" && bindingsFile) {
+        payload.bindingsContent = await bindingsFile.text();
+      } else if (bindingsSource === "url") {
+        payload.bindingsUrl = bindingsUrl;
+      }
+
+      ws.send(JSON.stringify(payload));
 
       toast({
         title: "Streaming Started",
