@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
-import { Upload, Link as LinkIcon, Code, CheckCircle, XCircle, Loader2, Copy, FileText, RefreshCw, Download } from "lucide-react";
+import { Upload, Link as LinkIcon, Code, CheckCircle, XCircle, Loader2, Copy, FileText, RefreshCw, Download, History, Trash2, Clock } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,9 +8,25 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
 import type { DecodeResponse } from "@shared/schema";
+
+interface DecodeHistoryItem {
+  id: string;
+  timestamp: number;
+  bindingsSource: "file" | "url";
+  bindingsFileName?: string;
+  bindingsUrl?: string;
+  feedUrl: string;
+  messageType?: string;
+  outputFormat: "json" | "xml" | "text";
+  output: string;
+  decodeTime: number;
+}
 
 export default function Decoder() {
   const [bindingsSource, setBindingsSource] = useState<"file" | "url">("file");
@@ -22,7 +38,71 @@ export default function Decoder() {
   const [outputFormat, setOutputFormat] = useState<"json" | "xml" | "text">("json");
   const [decodedOutput, setDecodedOutput] = useState("");
   const [decodeTime, setDecodeTime] = useState<number | null>(null);
+  const [history, setHistory] = useState<DecodeHistoryItem[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const { toast } = useToast();
+
+  // Load history from localStorage on mount
+  useEffect(() => {
+    const savedHistory = localStorage.getItem("protobuf-decode-history");
+    if (savedHistory) {
+      try {
+        setHistory(JSON.parse(savedHistory));
+      } catch (e) {
+        console.error("Failed to load history:", e);
+      }
+    }
+  }, []);
+
+  // Save to history
+  const saveToHistory = (data: DecodeResponse) => {
+    if (!data.success || !data.output) return;
+
+    const historyItem: DecodeHistoryItem = {
+      id: Date.now().toString(),
+      timestamp: Date.now(),
+      bindingsSource,
+      bindingsFileName: bindingsFile?.name,
+      bindingsUrl: bindingsUrl || undefined,
+      feedUrl,
+      messageType: messageType || undefined,
+      outputFormat,
+      output: data.output,
+      decodeTime: data.decodeTime || 0,
+    };
+
+    const newHistory = [historyItem, ...history].slice(0, 50); // Keep last 50
+    setHistory(newHistory);
+    localStorage.setItem("protobuf-decode-history", JSON.stringify(newHistory));
+  };
+
+  // Restore from history
+  const restoreFromHistory = (item: DecodeHistoryItem) => {
+    setBindingsSource(item.bindingsSource);
+    if (item.bindingsUrl) {
+      setBindingsUrl(item.bindingsUrl);
+    }
+    setFeedUrl(item.feedUrl);
+    setMessageType(item.messageType || "");
+    setOutputFormat(item.outputFormat);
+    setDecodedOutput(item.output);
+    setDecodeTime(item.decodeTime);
+    setShowHistory(false);
+    toast({
+      title: "Session Restored",
+      description: "Previous decode session loaded successfully",
+    });
+  };
+
+  // Clear history
+  const clearHistory = () => {
+    setHistory([]);
+    localStorage.removeItem("protobuf-decode-history");
+    toast({
+      title: "History Cleared",
+      description: "All decode history has been removed",
+    });
+  };
 
   const onDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -134,6 +214,7 @@ export default function Decoder() {
       if (data.success && data.output) {
         setDecodedOutput(data.output);
         setDecodeTime(data.decodeTime || null);
+        saveToHistory(data);
         toast({
           title: "Decode Successful",
           description: `Protobuf decoded in ${data.decodeTime}ms as ${data.format?.toUpperCase()}`,
@@ -231,6 +312,80 @@ export default function Decoder() {
             </div>
             <h1 className="text-xl font-bold tracking-tight">Protobuf Decoder</h1>
           </div>
+          
+          <Sheet open={showHistory} onOpenChange={setShowHistory}>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="sm" data-testid="button-show-history">
+                <History className="mr-2 h-4 w-4" />
+                History {history.length > 0 && `(${history.length})`}
+              </Button>
+            </SheetTrigger>
+            <SheetContent className="w-full sm:max-w-lg">
+              <SheetHeader>
+                <SheetTitle>Decode History</SheetTitle>
+                <SheetDescription>
+                  View and restore previous decode sessions
+                </SheetDescription>
+              </SheetHeader>
+              
+              <div className="mt-6 flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">{history.length} session(s)</p>
+                {history.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={clearHistory} data-testid="button-clear-history">
+                    <Trash2 className="mr-2 h-3 w-3" />
+                    Clear All
+                  </Button>
+                )}
+              </div>
+
+              <ScrollArea className="mt-4 h-[calc(100vh-200px)]">
+                {history.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <Clock className="mb-4 h-12 w-12 text-muted-foreground/50" />
+                    <p className="text-sm text-muted-foreground">No decode history yet</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Your decode sessions will appear here
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {history.map((item) => (
+                      <Card
+                        key={item.id}
+                        className="cursor-pointer transition-colors hover-elevate active-elevate-2"
+                        onClick={() => restoreFromHistory(item)}
+                        data-testid={`history-item-${item.id}`}
+                      >
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="secondary" className="text-xs">
+                                  {item.outputFormat.toUpperCase()}
+                                </Badge>
+                                <Badge variant="outline" className="text-xs">
+                                  {item.decodeTime}ms
+                                </Badge>
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                {new Date(item.timestamp).toLocaleString()}
+                              </p>
+                              <p className="truncate text-sm font-medium">{item.feedUrl}</p>
+                              {item.messageType && (
+                                <p className="text-xs text-muted-foreground">
+                                  Type: {item.messageType}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            </SheetContent>
+          </Sheet>
         </div>
       </header>
 
