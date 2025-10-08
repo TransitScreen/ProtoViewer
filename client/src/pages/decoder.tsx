@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
-import { Upload, Link as LinkIcon, Code, CheckCircle, XCircle, Loader2, Copy, FileText, RefreshCw, Download, History, Trash2, Clock } from "lucide-react";
+import { Upload, Link as LinkIcon, Code, CheckCircle, XCircle, Loader2, Copy, FileText, RefreshCw, Download, History, Trash2, Clock, Radio, Square } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,9 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
 import type { DecodeResponse } from "@shared/schema";
+import { useRef } from "react";
 
 interface DecodeHistoryItem {
   id: string;
@@ -40,6 +42,9 @@ export default function Decoder() {
   const [decodeTime, setDecodeTime] = useState<number | null>(null);
   const [history, setHistory] = useState<DecodeHistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamInterval, setStreamInterval] = useState<number>(1000);
+  const wsRef = useRef<WebSocket | null>(null);
   const { toast } = useToast();
 
   // Load history from localStorage on mount
@@ -78,10 +83,32 @@ export default function Decoder() {
 
   // Restore from history
   const restoreFromHistory = (item: DecodeHistoryItem) => {
-    setBindingsSource(item.bindingsSource);
-    if (item.bindingsUrl) {
-      setBindingsUrl(item.bindingsUrl);
+    // For file-based sessions, we can't restore the actual file, so switch to URL mode or show warning
+    if (item.bindingsSource === "file") {
+      // If URL is also available, use that
+      if (item.bindingsUrl) {
+        setBindingsSource("url");
+        setBindingsUrl(item.bindingsUrl);
+      } else {
+        // Can only restore output, not decode again without file
+        setDecodedOutput(item.output);
+        setDecodeTime(item.decodeTime);
+        setOutputFormat(item.outputFormat);
+        setShowHistory(false);
+        toast({
+          title: "Session Partially Restored",
+          description: "Output restored. Please re-upload bindings file to decode again.",
+          variant: "default",
+        });
+        return;
+      }
+    } else {
+      setBindingsSource(item.bindingsSource);
+      if (item.bindingsUrl) {
+        setBindingsUrl(item.bindingsUrl);
+      }
     }
+    
     setFeedUrl(item.feedUrl);
     setMessageType(item.messageType || "");
     setOutputFormat(item.outputFormat);
@@ -103,6 +130,128 @@ export default function Decoder() {
       description: "All decode history has been removed",
     });
   };
+
+  // WebSocket streaming functions
+  const startStreaming = async () => {
+    // Validate inputs first
+    if (!feedUrl.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a feed URL first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Get bindings content first
+    let bindingsContent: string;
+    
+    if (bindingsSource === "file") {
+      if (!bindingsFile) {
+        toast({
+          title: "Error",
+          description: "Please upload a bindings file first",
+          variant: "destructive",
+        });
+        return;
+      }
+      bindingsContent = await bindingsFile.text();
+    } else {
+      if (!bindingsUrl.trim()) {
+        toast({
+          title: "Error",
+          description: "Please enter a bindings URL first",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      try {
+        const response = await fetch(bindingsUrl);
+        bindingsContent = await response.text();
+      } catch (error: any) {
+        toast({
+          title: "Error",
+          description: `Failed to fetch bindings: ${error.message}`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    // Establish WebSocket connection
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws/stream`;
+    
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setIsStreaming(true);
+      
+      ws.send(JSON.stringify({
+        bindingsContent,
+        feedUrl,
+        messageType: messageType || undefined,
+        outputFormat,
+        interval: streamInterval,
+      }));
+
+      toast({
+        title: "Streaming Started",
+        description: `Decoding every ${streamInterval}ms`,
+      });
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      if (data.success) {
+        setDecodedOutput(data.output);
+        setDecodeTime(data.decodeTime);
+      } else {
+        toast({
+          title: "Stream Error",
+          description: data.error,
+          variant: "destructive",
+        });
+      }
+    };
+
+    ws.onerror = () => {
+      toast({
+        title: "Connection Error",
+        description: "Failed to establish streaming connection",
+        variant: "destructive",
+      });
+      stopStreaming();
+    };
+
+    ws.onclose = () => {
+      setIsStreaming(false);
+    };
+  };
+
+  const stopStreaming = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    setIsStreaming(false);
+    toast({
+      title: "Streaming Stopped",
+      description: "Real-time decoding has been stopped",
+    });
+  };
+
+  // Clean up WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, []);
 
   const onDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -550,9 +699,53 @@ export default function Decoder() {
               <CardDescription className="text-xs">Execute protobuf decoding</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Streaming Toggle */}
+              <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
+                <div className="flex items-center gap-3">
+                  <Radio className={`h-4 w-4 ${isStreaming ? "text-primary animate-pulse" : "text-muted-foreground"}`} />
+                  <div>
+                    <p className="text-sm font-medium">Real-time Streaming</p>
+                    <p className="text-xs text-muted-foreground">
+                      {isStreaming ? `Updating every ${streamInterval}ms` : "Continuous decode updates"}
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={isStreaming}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      startStreaming();
+                    } else {
+                      stopStreaming();
+                    }
+                  }}
+                  disabled={!canDecode}
+                  data-testid="switch-streaming"
+                />
+              </div>
+
+              {/* Streaming Interval Control */}
+              {!isStreaming && (
+                <div className="space-y-2">
+                  <Label htmlFor="stream-interval" className="text-xs font-medium uppercase tracking-wide">
+                    Update Interval (ms)
+                  </Label>
+                  <Input
+                    id="stream-interval"
+                    type="number"
+                    min={100}
+                    max={10000}
+                    step={100}
+                    value={streamInterval}
+                    onChange={(e) => setStreamInterval(parseInt(e.target.value) || 1000)}
+                    data-testid="input-stream-interval"
+                  />
+                </div>
+              )}
+
               <Button
                 onClick={handleDecode}
-                disabled={!canDecode}
+                disabled={!canDecode || isStreaming}
                 className="w-full"
                 size="lg"
                 data-testid="button-decode"
@@ -565,7 +758,7 @@ export default function Decoder() {
                 ) : (
                   <>
                     <Code className="mr-2 h-4 w-4" />
-                    Decode Protobuf
+                    Decode Once
                   </>
                 )}
               </Button>
