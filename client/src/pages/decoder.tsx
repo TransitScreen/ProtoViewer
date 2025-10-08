@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
-import { Upload, Link as LinkIcon, Code, CheckCircle, XCircle, Loader2, Copy, FileText, RefreshCw } from "lucide-react";
+import { Upload, Link as LinkIcon, Code, CheckCircle, XCircle, Loader2, Copy, FileText, RefreshCw, Download } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -192,6 +192,27 @@ export default function Decoder() {
     toast({
       title: "Copied",
       description: "Output copied to clipboard",
+    });
+  };
+
+  const downloadOutput = () => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const extension = outputFormat === "json" ? "json" : outputFormat === "xml" ? "xml" : "txt";
+    const filename = `protobuf-decoded-${timestamp}.${extension}`;
+
+    const blob = new Blob([decodedOutput], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: "Downloaded",
+      description: `Output saved as ${filename}`,
     });
   };
 
@@ -441,15 +462,26 @@ export default function Decoder() {
                 </SelectContent>
               </Select>
               {decodedOutput && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={copyToClipboard}
-                  data-testid="button-copy-output"
-                >
-                  <Copy className="mr-2 h-4 w-4" />
-                  Copy
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={downloadOutput}
+                    data-testid="button-download-output"
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Download
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={copyToClipboard}
+                    data-testid="button-copy-output"
+                  >
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy
+                  </Button>
+                </>
               )}
             </div>
           </div>
