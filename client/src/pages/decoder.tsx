@@ -19,6 +19,7 @@ export default function Decoder() {
   const [feedUrl, setFeedUrl] = useState("");
   const [messageType, setMessageType] = useState<string>("");
   const [availableTypes, setAvailableTypes] = useState<string[]>([]);
+  const [outputFormat, setOutputFormat] = useState<"json" | "xml" | "text">("json");
   const [decodedOutput, setDecodedOutput] = useState("");
   const [decodeTime, setDecodeTime] = useState<number | null>(null);
   const { toast } = useToast();
@@ -107,6 +108,8 @@ export default function Decoder() {
         formData.append("messageType", messageType);
       }
 
+      formData.append("outputFormat", outputFormat);
+
       if (bindingsSource === "file" && bindingsFile) {
         formData.append("bindingsFile", bindingsFile);
       } else if (bindingsSource === "url" && bindingsUrl) {
@@ -128,13 +131,12 @@ export default function Decoder() {
       return response.json() as Promise<DecodeResponse>;
     },
     onSuccess: (data) => {
-      if (data.success && data.data) {
-        const formatted = JSON.stringify(data.data, null, 2);
-        setDecodedOutput(formatted);
+      if (data.success && data.output) {
+        setDecodedOutput(data.output);
         setDecodeTime(data.decodeTime || null);
         toast({
           title: "Decode Successful",
-          description: `Protobuf decoded in ${data.decodeTime}ms`,
+          description: `Protobuf decoded in ${data.decodeTime}ms as ${data.format?.toUpperCase()}`,
         });
       } else {
         toast({
@@ -422,22 +424,34 @@ export default function Decoder() {
 
         {/* Output Section */}
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1">
               <h2 className="text-2xl font-semibold">Decoded Output</h2>
-              <p className="text-sm text-muted-foreground">JSON representation of the protobuf data</p>
+              <p className="text-sm text-muted-foreground">Formatted protobuf data</p>
             </div>
-            {decodedOutput && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={copyToClipboard}
-                data-testid="button-copy-output"
-              >
-                <Copy className="mr-2 h-4 w-4" />
-                Copy
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              <Select value={outputFormat} onValueChange={(v) => setOutputFormat(v as "json" | "xml" | "text")}>
+                <SelectTrigger className="w-32" data-testid="select-output-format">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="json" data-testid="option-format-json">JSON</SelectItem>
+                  <SelectItem value="xml" data-testid="option-format-xml">XML</SelectItem>
+                  <SelectItem value="text" data-testid="option-format-text">Text</SelectItem>
+                </SelectContent>
+              </Select>
+              {decodedOutput && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={copyToClipboard}
+                  data-testid="button-copy-output"
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy
+                </Button>
+              )}
+            </div>
           </div>
 
           <Card>

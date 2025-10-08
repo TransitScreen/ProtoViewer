@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import multer from "multer";
 import axios from "axios";
 import protobuf from "protobufjs";
+import { js2xml } from "xml-js";
 
 // Configure multer for file uploads
 const upload = multer({ storage: multer.memoryStorage() });
@@ -190,7 +191,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const { messageType: requestedMessageType } = req.body;
+      const { messageType: requestedMessageType, outputFormat = "json" } = req.body;
 
       let decoded: any = null;
       let successfulType: string = "";
@@ -245,18 +246,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const decodeTime = Date.now() - startTime;
 
-      // Convert to plain object for JSON serialization
+      // Convert to plain object
       const plainObject = messageTypeObj.toObject(decoded, {
         longs: String,
         enums: String,
         bytes: String,
       });
 
+      // Format output based on requested format
+      let output: string;
+      let responseData: any;
+
+      switch (outputFormat) {
+        case "xml":
+          output = js2xml({ protobuf: plainObject }, { compact: true, spaces: 2 });
+          responseData = plainObject;
+          break;
+        case "text":
+          // Readable text format with indentation
+          const formatAsText = (obj: any, indent = 0): string => {
+            const spaces = "  ".repeat(indent);
+            let result = "";
+            
+            for (const [key, value] of Object.entries(obj)) {
+              if (value === null || value === undefined) continue;
+              
+              if (typeof value === "object" && !Array.isArray(value)) {
+                result += `${spaces}${key}:\n`;
+                result += formatAsText(value, indent + 1);
+              } else if (Array.isArray(value)) {
+                result += `${spaces}${key}:\n`;
+                value.forEach((item, idx) => {
+                  if (typeof item === "object") {
+                    result += `${spaces}  [${idx}]:\n`;
+                    result += formatAsText(item, indent + 2);
+                  } else {
+                    result += `${spaces}  [${idx}]: ${item}\n`;
+                  }
+                });
+              } else {
+                result += `${spaces}${key}: ${value}\n`;
+              }
+            }
+            return result;
+          };
+          output = formatAsText(plainObject);
+          responseData = plainObject;
+          break;
+        case "json":
+        default:
+          output = JSON.stringify(plainObject, null, 2);
+          responseData = plainObject;
+          break;
+      }
+
       res.json({
         success: true,
-        data: plainObject,
+        data: responseData,
+        output,
         decodeTime,
         messageType: successfulType,
+        format: outputFormat,
       });
     } catch (error: any) {
       console.error("Decode error:", error);
