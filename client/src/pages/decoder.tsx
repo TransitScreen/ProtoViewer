@@ -43,7 +43,7 @@ export default function Decoder() {
   const [history, setHistory] = useState<DecodeHistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [streamInterval, setStreamInterval] = useState<number>(1000);
+  const [streamInterval, setStreamInterval] = useState<number>(15);
   const wsRef = useRef<WebSocket | null>(null);
   const { toast } = useToast();
 
@@ -178,7 +178,7 @@ export default function Decoder() {
         feedUrl,
         messageType: messageType || undefined,
         outputFormat,
-        interval: streamInterval,
+        interval: streamInterval * 1000, // Convert seconds to milliseconds
       };
 
       // Add bindings content or URL
@@ -192,7 +192,7 @@ export default function Decoder() {
 
       toast({
         title: "Streaming Started",
-        description: `Decoding every ${streamInterval}ms`,
+        description: `Decoding every ${streamInterval} seconds`,
       });
     };
 
@@ -721,29 +721,29 @@ export default function Decoder() {
               {!isStreaming && (
                 <div className="space-y-2">
                   <Label htmlFor="stream-interval" className="text-xs font-medium uppercase tracking-wide">
-                    Update Interval (ms)
+                    Update Interval (seconds)
                   </Label>
                   <Input
                     id="stream-interval"
                     type="number"
-                    min={100}
-                    max={10000}
-                    step={100}
+                    min={5}
+                    max={300}
+                    step={1}
                     value={streamInterval}
                     onChange={(e) => {
                       const value = parseInt(e.target.value);
                       if (isNaN(value)) {
-                        setStreamInterval(1000);
+                        setStreamInterval(15);
                       } else {
-                        // Clamp value between 100 and 10000
-                        setStreamInterval(Math.min(Math.max(value, 100), 10000));
+                        // Clamp value between 5 and 300 seconds
+                        setStreamInterval(Math.min(Math.max(value, 5), 300));
                       }
                     }}
                     onBlur={(e) => {
                       // Re-clamp on blur to ensure valid value
                       const value = parseInt(e.target.value);
-                      if (isNaN(value) || value < 100 || value > 10000) {
-                        setStreamInterval(Math.min(Math.max(value || 1000, 100), 10000));
+                      if (isNaN(value) || value < 5 || value > 300) {
+                        setStreamInterval(Math.min(Math.max(value || 15, 5), 300));
                       }
                     }}
                     data-testid="input-stream-interval"
