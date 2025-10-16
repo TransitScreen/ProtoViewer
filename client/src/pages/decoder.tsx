@@ -31,7 +31,7 @@ interface DecodeHistoryItem {
 }
 
 export default function Decoder() {
-  const [bindingsSource, setBindingsSource] = useState<"file" | "url">("file");
+  const [bindingsSource, setBindingsSource] = useState<"file" | "url">("url");
   const [bindingsFile, setBindingsFile] = useState<File | null>(null);
   const [bindingsUrl, setBindingsUrl] = useState("https://gtfs.org/documentation/realtime/gtfs-realtime.proto");
   const [feedUrl, setFeedUrl] = useState("");
@@ -544,8 +544,8 @@ export default function Decoder() {
             <CardContent>
               <Tabs value={bindingsSource} onValueChange={(v) => setBindingsSource(v as "file" | "url")}>
                 <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="file" data-testid="tab-bindings-file">File Upload</TabsTrigger>
                   <TabsTrigger value="url" data-testid="tab-bindings-url">URL</TabsTrigger>
+                  <TabsTrigger value="file" data-testid="tab-bindings-file">File Upload</TabsTrigger>
                 </TabsList>
                 
                 <TabsContent value="file" className="mt-4">
