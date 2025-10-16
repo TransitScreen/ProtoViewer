@@ -539,7 +539,7 @@ export default function Decoder() {
           <Card data-testid="card-bindings-input">
             <CardHeader className="space-y-1">
               <CardTitle className="text-lg">Protobuf Bindings</CardTitle>
-              <CardDescription className="text-xs">Upload a .proto file or provide a URL</CardDescription>
+              <CardDescription className="text-xs">(Optional) Upload a .proto file or provide a URL. Defaults to GTFS-Realtime bindings</CardDescription>
             </CardHeader>
             <CardContent>
               <Tabs value={bindingsSource} onValueChange={(v) => setBindingsSource(v as "file" | "url")}>
