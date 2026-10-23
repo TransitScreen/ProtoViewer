@@ -321,7 +321,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   
   // WebSocket server for streaming decode
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws/stream" });
+  const wss = new WebSocketServer({ noServer: true });
+  httpServer.on("upgrade", (request, socket, head) => {
+    if (request.url?.split("?")[0] !== "/ws/stream") return;
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+  });
 
   wss.on("connection", (ws: WebSocket) => {
     console.log("WebSocket client connected");

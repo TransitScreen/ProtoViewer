@@ -1,0 +1,1 @@
+- [npm nested esbuild overrides](npm-nested-esbuild-overrides.md) — npm may retain a vulnerable nested esbuild despite a parent-scoped override; verify the installed tree.
